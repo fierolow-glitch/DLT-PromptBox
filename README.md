@@ -1,34 +1,45 @@
-# DLT-PromptBox
-El gestor de prompts minimalista, privado y sin fricción.
-# Información Legal y Privacidad
+# 🚀 PromptBox & PromptBuilder
 
-**Herramientas:** PromptBox y PromptBuilder
-**Autor:** David López
-**Desarrollo:** Creado con la asistencia de IA (Google Gemini).
+**Por David López** *Herramientas portátiles y privadas para la gestión y creación de prompts de IA.*
 
-## 1. Privacidad y Datos
-Estas herramientas han sido diseñadas bajo el principio de "Privacidad por Diseño":
-- **Sin Procesamiento en Servidor:** Todo el código se ejecuta localmente en el navegador del usuario.
-- **Sin Recopilación de Datos:** No se capturan, almacenan ni comparten datos personales, prompts, ni metadatos.
-- **Sin Registro:** No se requiere creación de cuenta ni instalación de software adicional.
+---
 
-## 2. Exención de Responsabilidad
-El uso de PromptBox y PromptBuilder es responsabilidad exclusiva del usuario. Dado que son herramientas de apoyo para la generación de prompts e interacción con IAs:
-- El autor no garantiza la exactitud de los resultados generados por los modelos de IA externos donde se utilicen estos prompts.
-- El autor no se hace responsable de cualquier uso indebido, pérdida de información o daños derivados de la aplicación del código proporcionado.
+## 🌟 ¿Qué es PromptBox?
+**PromptBox** es una aplicación de escritorio (desarrollada con Electron) diseñada para creativos y desarrolladores que buscan un flujo de trabajo ágil con Inteligencia Artificial. Permite organizar, guardar y refinar tus prompts sin fricciones.
 
-## 3. Atribución
-Si decides modificar o redistribuir estas herramientas, se agradece mantener la mención a la autoría original de David López.
+### 🛠️ Características Principales
+- **100% Privado:** No se envían datos a ningún servidor. Todo se procesa y almacena localmente en tu equipo.
+- **Sin Instalación:** Versión portable lista para usar. 
+- **Sin Registros:** No necesitas crear una cuenta ni compartir tu correo.
+- **Ligero:** Cero dependencias externas en tiempo de ejecución.
 
-Descripción:
+---
 
-PromptBox es una herramienta diseñada para creativos y desarrolladores que necesitan organizar, refinar y desplegar sus bibliotecas de prompts de forma instantánea. A diferencia de otras herramientas complejas, PromptBox nace bajo la filosofía de "cero configuración": sin bases de datos externas, sin cuentas y sin instalaciones.
+## 💾 Descargas (Ejecutables)
+Si no eres desarrollador y solo quieres usar la herramienta, descarga la última versión aquí:
 
-Puntos clave (Highlights):
-Privacidad Total: Los datos nunca salen de tu navegador. No hay servidores intermedios ni rastreo de información.
+👉 **[DESCARGAR PROMPTBOX (Windows/Mac)](https://dltprompttools/bss.design)** *(Aquí pondrás el enlace a tu sección de Releases)*
 
-Acceso Instantáneo: Una interfaz limpia pensada para la agilidad en el flujo de trabajo diario con IA.
+---
 
-Portabilidad: Al ser una herramienta basada en web local, puedes llevarla contigo y ejecutarla en cualquier entorno sin dependencias.
+## 🏗️ Para Desarrolladores
+Este proyecto fue creado con la asistencia de **Google Gemini** y utiliza **Electron** para la interfaz de escritorio.
 
-Desarrollo Ético: Creado por David López con el apoyo de IA (Google Gemini), optimizado para ofrecer una experiencia de usuario fluida y ligera.
+### Instalación del código fuente:
+Si quieres modificarlo o estudiarlo:
+1. Clona el repositorio.
+2. Ejecuta `npm install` para instalar las dependencias de Electron.
+3. Ejecuta `npm start` para lanzar la aplicación en modo desarrollo.
+
+---
+
+## ⚖️ Licencia y Privacidad
+Este proyecto se distribuye bajo la **Licencia MIT**, lo que significa que puedes usarlo, modificarlo y compartirlo libremente.
+
+- **Autor:** David López
+- **Privacidad:** Esta herramienta **no recopila datos**, no usa cookies ni realiza llamadas a APIs externas para rastreo. 
+
+---
+
+## 🎁 Un regalo para la comunidad
+He decidido liberar estas herramientas de forma gratuita para apoyar a la comunidad de creativos y desarrolladores IA. ¡Espero que te sirva de ayuda en tus proyectos!
