@@ -1,0 +1,753 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>PromptBox · App de Escritorio</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <style>
+        body { font-family: system-ui, -apple-system, sans-serif; }
+        ::-webkit-scrollbar { width: 8px; }
+        ::-webkit-scrollbar-track { background: #0a0a0a; }
+        ::-webkit-scrollbar-thumb { background: #262626; border-radius: 10px; }
+        ::-webkit-scrollbar-thumb:hover { background: #404040; }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .animate-fade { animation: fadeIn 0.4s ease forwards; }
+        .status-dot { height: 10px; width: 10px; border-radius: 50%; display: inline-block; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+
+        /* EFECTO DRAG OVER */
+        .drag-over {
+            border-color: #6366f1 !important; 
+            background-color: rgba(99, 102, 241, 0.1) !important;
+            transform: scale(1.02);
+            transition: all 0.2s ease;
+        }
+
+        /* EFECTO RESPLANDOR Y ELEVACIÓN */
+        .prompt-card {
+            transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+            position: relative;
+            overflow: hidden;
+        }
+
+        .prompt-card:hover {
+            border-color: rgba(99, 102, 241, 0.6) !important;
+            transform: translateY(-5px) scale(1.01);
+            box-shadow: 0 10px 30px -10px rgba(99, 102, 241, 0.3), 
+                        0 0 15px -5px rgba(99, 102, 241, 0.2);
+        }
+
+        .prompt-card::before {
+            content: "";
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(45deg, transparent, rgba(255,255,255,0.03), transparent);
+            transform: translateX(-100%);
+            transition: 0.6s;
+            pointer-events: none;
+        }
+
+        .prompt-card:hover::before { transform: translateX(100%); }
+
+        .custom-scrollbar::-webkit-scrollbar { width: 4px; }
+
+        .status-dot {
+    height: 8px;
+    width: 8px;
+    border-radius: 50%;
+    display: inline-block;
+}
+/* Animación sutil de parpadeo para el estado conectado */
+.animate-pulse {
+    animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: .5; }
+}
+    </style>
+
+    <script>
+        const { ipcRenderer, webUtils } = require('electron'); 
+        const fs = require('fs');
+        const path = require('path');
+
+        let prompts = JSON.parse(localStorage.getItem("prompts")) || [];
+        let rutaCarpeta = localStorage.getItem("rutaMedios") || null;
+        let mostrarSoloFavoritos = false;
+
+        // --- SISTEMA DE ARCHIVOS Y CARPETAS ---
+        async function seleccionarCarpeta() {
+            const ruta = await ipcRenderer.invoke('dialog:openDirectory');
+            if (ruta) {
+                rutaCarpeta = ruta;
+                localStorage.setItem("rutaMedios", rutaCarpeta);
+                actualizarEstadoCarpeta();
+                render();
+                toast("Carpeta vinculada con éxito");
+            }
+        }
+
+        function actualizarEstadoCarpeta() {
+    const container = document.getElementById('folderStatus');
+    if (!container) return;
+
+    if (rutaCarpeta) {
+        // Obtenemos solo el nombre de la última carpeta para que no sea una ruta larguísima
+        const nombreCarpeta = rutaCarpeta.split(path.sep).pop() || "Raíz";
+        
+        container.innerHTML = `
+            <span class="status-dot bg-green-500 shadow-[0_0_10px_rgba(34,197,94,0.5)] animate-pulse"></span>
+            <span class="text-[10px] uppercase tracking-[0.2em] text-indigo-400 font-bold">Conectado: ${nombreCarpeta}</span>
+            <button onclick="verificarRutaUSB(); render();" class="ml-1 opacity-30 hover:opacity-100 transition-opacity" title="Refrescar conexión">
+                <svg xmlns="http://www.w3.org/2000/svg" width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2v6h-6"></path><path d="M3 12a9 9 0 0 1 15-6.7L21 8"></path><path d="M3 22v-6h6"></path><path d="M21 12a9 9 0 0 1-15 6.7L3 16"></path></svg>
+            </button>
+        `;
+    } else {
+        container.innerHTML = `
+            <span class="status-dot bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"></span>
+            <span class="text-[10px] uppercase tracking-[0.2em] text-neutral-600 font-bold">Carpeta no vinculada</span>
+        `;
+    }
+}
+
+        async function verificarRutaUSB() {
+            if (!rutaCarpeta) return; 
+            const directorioActual = await ipcRenderer.invoke('get-app-path'); 
+            const nombreCarpetaOriginal = rutaCarpeta.split(path.sep).pop();
+            const nuevaRutaSugerida = path.join(directorioActual, nombreCarpetaOriginal);
+            if (!fs.existsSync(rutaCarpeta) && fs.existsSync(nuevaRutaSugerida)) {
+                rutaCarpeta = nuevaRutaSugerida;
+                localStorage.setItem("rutaMedios", rutaCarpeta);
+            }
+        }
+
+      function generarPreviewMedia(p) {
+    if (!p.archivo || !rutaCarpeta) {
+        return `<div class="h-full w-full bg-neutral-800/50 flex items-center justify-center"><span class="opacity-20 text-[10px] font-bold uppercase tracking-widest">Sin medios</span></div>`;
+    }
+    
+    // Normalizamos la ruta para Electron
+    const rutaMedia = `file:///${path.join(rutaCarpeta, p.archivo).replace(/\\/g, '/')}`;
+    const extension = p.archivo.split('.').pop().toLowerCase();
+
+    // 1. Si es VIDEO
+    if (p.archivo.match(/\.(mp4|webm|ogg|mov)$/i)) {
+        return `<video class="h-full w-full object-cover" muted onmouseover="this.play()" onmouseout="this.pause(); this.currentTime=0;"><source src="${rutaMedia}"></video>`;
+    }
+    
+    // 2. Si es IMAGEN
+    if (p.archivo.match(/\.(jpg|jpeg|png|webp|gif|avif)$/i)) {
+        return `<img src="${rutaMedia}" class="h-full w-full object-cover">`;
+    }
+
+    // 3. Si es PDF (Podemos intentar mostrar una miniatura real usando un iframe o un objeto)
+    if (extension === 'pdf') {
+        return `<div class="h-full w-full bg-neutral-900 flex items-center justify-center relative overflow-hidden">
+                    <embed src="${rutaMedia}#toolbar=0&navpanes=0&scrollbar=0" type="application/pdf" class="w-full h-full pointer-events-none scale-150">
+                    <div class="absolute inset-0 bg-black/20"></div>
+                    <span class="absolute bottom-2 right-2 bg-red-600 text-[8px] font-bold px-2 py-0.5 rounded text-white">PDF</span>
+                </div>`;
+    }
+
+    // 4. Para WORD u otros (No se pueden previsualizar nativamente en HTML sin librerías pesadas)
+    // Mostramos un icono mucho más limpio y profesional que no parezca un error
+    return `
+        <div class="h-full w-full bg-indigo-900/20 flex flex-col items-center justify-center border-b border-white/5">
+            <svg xmlns="http://www.w3.org/2000/svg" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1" stroke-linecap="round" stroke-linejoin="round"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+            <span class="text-[9px] font-black mt-3 text-indigo-400 tracking-tighter uppercase">${extension}</span>
+            <span class="text-[8px] opacity-30 mt-1 max-w-[80%] truncate text-white">${p.archivo}</span>
+        </div>`;
+}
+
+        // --- LÓGICA DE TARJETAS (UNIFICADA) ---
+        function crearHTMLTarjeta(p, esGaleria = false) {
+            const iconoEstrella = p.favorito ? '★' : '☆';
+            const colorEstrella = p.favorito ? 'text-yellow-400 opacity-100' : 'text-white opacity-40 hover:opacity-100';
+            const onClickAction = `abrirModal(${p.id})`;
+            
+            return `
+            <article class="prompt-card bg-neutral-900/40 backdrop-blur-sm border border-neutral-800/50 rounded-[2rem] flex flex-col overflow-hidden cursor-pointer group shadow-xl relative" onclick="${onClickAction}">
+                <div class="relative overflow-hidden ${esGaleria ? 'h-52' : 'h-44'}">
+                    <button onclick="toggleFavorito(${p.id}, event)" class="absolute top-4 left-4 z-20 bg-black/60 p-2 rounded-xl border border-white/10 ${colorEstrella} hover:scale-110 transition-transform">
+                        ${iconoEstrella}
+                    </button>
+                    ${esGaleria ? `
+                    <button onclick="eliminarPromptExplorer(${p.id}, event)" class="absolute top-4 right-4 z-20 bg-red-500/20 hover:bg-red-500 text-red-500 p-2 rounded-xl border border-red-500/20 hover:scale-110 transition-all shadow-xl">
+                        <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"></path><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"></path><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"></path></svg>
+                    </button>` : ''}
+                    ${generarPreviewMedia(p)}
+                    <div class="absolute inset-0 bg-gradient-to-t from-neutral-950 via-transparent to-transparent opacity-60"></div>
+                    <div class="absolute bottom-4 left-4 flex gap-2">
+                        <span class="text-[9px] font-bold bg-black/60 backdrop-blur-md text-white px-3 py-1.5 rounded-lg border border-white/10 uppercase tracking-wider">${p.ia || 'N/A'}</span>
+                    </div>
+                </div>
+                <div class="${esGaleria ? 'p-8' : 'p-6'} space-y-4">
+                    <div class="flex justify-between items-center">
+                        <span class="text-[10px] font-bold text-indigo-400 uppercase tracking-[0.2em]">${p.tipo}</span>
+                        <span class="text-[10px] text-neutral-600 font-mono opacity-80">${p.fecha ? p.fecha.split(',')[0] : ''}</span>
+                    </div>
+                    <p class="text-xs text-neutral-400 line-clamp-2 leading-relaxed group-hover:text-neutral-200 transition-colors">
+                        ${p.prompt}
+                    </p>
+                </div>
+            </article>`;
+        }
+
+        // --- RENDERIZADO ---
+        function render() {
+            const contenedor = document.getElementById('historial');
+            if (!contenedor) return;
+            const busqueda = document.getElementById('searchText').value.toLowerCase();
+            const tipoFiltro = document.getElementById('searchTipo').value;
+
+            let filtrados = prompts.filter(p => {
+                const coincideTxt = p.prompt.toLowerCase().includes(busqueda) || 
+                                   (p.tags && p.tags.some(t => t.toLowerCase().includes(busqueda))) ||
+                                   p.ia.toLowerCase().includes(busqueda);
+                const coincideTipo = !tipoFiltro || p.tipo === tipoFiltro;
+                const coincideFav = mostrarSoloFavoritos ? p.favorito === true : true;
+                return coincideTxt && coincideTipo && coincideFav;
+            });
+
+            document.getElementById('contadorPrompts').innerText = `${filtrados.length} Prompts`;
+            contenedor.innerHTML = filtrados.slice(0, 12).map(p => crearHTMLTarjeta(p, false)).join('');
+            actualizarSugerenciasIA();
+        }
+
+        function renderExplorer() {
+            const contenedor = document.getElementById('explorerGrid');
+            if (!contenedor) return;
+            const busquedaRaw = document.getElementById('explorerSearchText').value.toLowerCase();
+            const terminos = busquedaRaw.split(/[\s,]+/).filter(t => t.length > 0);
+
+            const filtrados = prompts.filter(p => {
+                const coincideFav = mostrarSoloFavoritos ? p.favorito === true : true;
+                if (!coincideFav) return false;
+                if (terminos.length === 0) return true;
+                return terminos.every(t => 
+                    p.prompt.toLowerCase().includes(t) || 
+                    p.ia.toLowerCase().includes(t) || 
+                    (p.tags && p.tags.some(tag => tag.toLowerCase().includes(t)))
+                );
+            });
+
+            document.getElementById('explorerCount').innerText = `${filtrados.length} Registros`;
+            contenedor.innerHTML = filtrados.length > 0 
+                ? filtrados.map(p => crearHTMLTarjeta(p, true)).join('')
+                : `<div class="col-span-full py-20 text-center opacity-30">No se encontraron resultados</div>`;
+        }
+
+        function renderExplorerChips() {
+            const contenedor = document.getElementById('explorerTagChips');
+            if (!contenedor) return;
+            const etiquetas = ["Horizontal", "Vertical", "Square", "Portrait", "Landscape", "Close-up", "Wide shot", "Medium shot", "Aerial", "Macro", "Panorama", "Time-lapse", "Slow motion", "4K", "HD", "Cinematic", "High contrast", "Low light", "Background", "Copy space", "People", "person","animal", "fantasy"];
+            contenedor.innerHTML = etiquetas.map(tag => `
+                <button onclick="filtrarPorChip('${tag}')" class="text-[10px] bg-indigo-600/10 hover:bg-indigo-600 text-indigo-400 hover:text-white px-4 py-2 rounded-full border border-indigo-500/20 transition-all whitespace-nowrap font-bold uppercase tracking-wider">${tag}</button>
+            `).join('') + `<button onclick="document.getElementById('explorerSearchText').value=''; renderExplorer();" class="text-[10px] bg-neutral-800 text-neutral-500 px-4 py-2 rounded-full border border-neutral-700 hover:text-white transition-all font-bold uppercase tracking-wider">Limpiar</button>`;
+        }
+
+        function filtrarPorChip(tag) {
+            const input = document.getElementById('explorerSearchText');
+            input.value = tag;
+            renderExplorer();
+        }
+
+        // --- ACCIONES ---
+        function toggleFavorito(id, event) {
+            if (event) event.stopPropagation();
+            prompts = prompts.map(p => p.id === id ? { ...p, favorito: !p.favorito } : p);
+            localStorage.setItem("prompts", JSON.stringify(prompts));
+            render();
+            if (!document.getElementById('explorerModal').classList.contains('hidden')) renderExplorer();
+        }
+
+        function toggleFiltroFavoritos() {
+            mostrarSoloFavoritos = !mostrarSoloFavoritos;
+            render();
+            const btn = document.getElementById('filterFavs');
+            btn.innerText = mostrarSoloFavoritos ? "★ Solo Favoritos" : "☆ Favoritos";
+            btn.classList.toggle('text-yellow-400', mostrarSoloFavoritos);
+            btn.classList.toggle('border-yellow-500', mostrarSoloFavoritos);
+        }
+
+        function toast(msj) {
+            const t = document.getElementById('toast');
+            document.getElementById('toastMessage').innerText = msj;
+            t.classList.remove('translate-y-20', 'opacity-0');
+            setTimeout(() => t.classList.add('translate-y-20', 'opacity-0'), 2500);
+        }
+
+        function handleDrop(event) {
+            event.preventDefault();
+            document.getElementById('dropZone').classList.remove('drag-over');
+            if (event.dataTransfer.files.length > 0) {
+                document.getElementById('archivoInput').files = event.dataTransfer.files;
+                toast("Archivo listo: " + event.dataTransfer.files[0].name);
+            }
+        }
+
+        async function guardarPrompt() {
+            const editId = document.getElementById('editId').value;
+            const pText = document.getElementById('promptInput').value;
+            if (!pText) return alert("Prompt obligatorio");
+
+            const fileInput = document.getElementById('archivoInput');
+            let archivoNombre = editId ? (prompts.find(p => p.id == editId)?.archivo || null) : null;
+
+            if (fileInput.files.length > 0) {
+    if (!rutaCarpeta) return alert("Por favor, vincula una carpeta de medios primero.");
+    const file = fileInput.files[0];
+    archivoNombre = file.name;
+    const rutaOrigen = webUtils.getPathForFile(file); // Método oficial de Electron
+    const rutaDestino = path.join(rutaCarpeta, archivoNombre);
+    
+    // Solo copiamos si el archivo no existe ya allí para evitar errores de permisos
+    if (rutaOrigen !== rutaDestino) {
+        fs.copyFileSync(rutaOrigen, rutaDestino);
+    }
+}
+
+            const nuevo = {
+                id: editId ? Number(editId) : Date.now(),
+                tipo: document.getElementById('tipo').value || "Otros",
+                ia: document.getElementById('ia').value || "N/A",
+                tags: document.getElementById('tags').value.split(",").map(t=>t.trim()).filter(Boolean),
+                archivo: archivoNombre,
+                prompt: pText,
+                traduccion: document.getElementById('traduccion').value,
+                favorito: editId ? (prompts.find(p => p.id == editId)?.favorito || false) : false,
+                fecha: editId ? (prompts.find(p => p.id == editId)?.fecha) : new Date().toLocaleString()
+            };
+
+            if (editId) {
+                const idx = prompts.findIndex(p => p.id == editId);
+                prompts[idx] = nuevo;
+                cancelarEdicion();
+            } else {
+                prompts.unshift(nuevo);
+                document.getElementById('promptInput').value = "";
+                document.getElementById('traduccion').value = "";
+                document.getElementById('tags').value = "";
+            }
+            localStorage.setItem("prompts", JSON.stringify(prompts));
+            render();
+            toast("Guardado correctamente");
+        }
+
+        function eliminarPromptExplorer(id, event) {
+            if (event) event.stopPropagation();
+            if (confirm("¿Eliminar este prompt?")) {
+                prompts = prompts.filter(p => p.id !== id);
+                localStorage.setItem("prompts", JSON.stringify(prompts));
+                render();
+                renderExplorer();
+                toast("Eliminado");
+            }
+        }
+
+function prepararEdicion(id) {
+    const p = prompts.find(i => i.id === id);
+    if (!p) return;
+
+    // --- CORRECCIÓN: Reactivamos el scroll para poder editar ---
+    document.body.style.overflow = 'auto';
+
+    // Rellenamos el formulario principal
+    document.getElementById('editId').value = p.id;
+    document.getElementById('tipo').value = p.tipo;
+    document.getElementById('ia').value = p.ia || "";
+    document.getElementById('promptInput').value = p.prompt;
+    document.getElementById('traduccion').value = p.traduccion || "";
+    document.getElementById('tags').value = p.tags ? p.tags.join(", ") : "";
+    
+    // Cambiamos el texto del botón principal
+    document.getElementById('btnGuardar').innerText = "ACTUALIZAR PROMPT";
+    document.getElementById('btnCancelar').classList.remove('hidden');
+
+    // Subimos al inicio para que el usuario vea el formulario relleno
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+    
+    // Si la galería estaba abierta, la cerramos para editar
+    cerrarExplorer(); 
+}
+
+        function cancelarEdicion() {
+            document.getElementById('editId').value = "";
+            document.getElementById('promptInput').value = "";
+            document.getElementById('btnGuardar').innerText = "GUARDAR EN ARCHIVO LOCAL";
+            document.getElementById('btnCancelar').classList.add('hidden');
+        }
+
+   function abrirModal(id) {
+    const p = prompts.find(i => i.id === id);
+    if (!p) return;
+
+    const content = document.getElementById('modalContent');
+    // Requerimos path si no está disponible globalmente para construir la ruta
+    const path = require('path');
+    const rutaMedia = p.archivo && rutaCarpeta ? `file:///${path.join(rutaCarpeta, p.archivo).replace(/\\/g, '/')}` : null;
+    const extension = p.archivo ? p.archivo.split('.').pop().toLowerCase() : '';
+    
+    // 1. Generador de Visualizador
+    let visualizador = '<div class="w-full h-40 bg-neutral-800 rounded-2xl flex items-center justify-center opacity-20 text-[10px] font-bold tracking-widest">SIN MEDIA</div>';
+
+    if (rutaMedia) {
+        if (extension.match(/(mp4|mov|webm)$/i)) {
+            visualizador = `<video controls class="w-full rounded-2xl bg-black max-h-[400px] shadow-2xl"><source src="${rutaMedia}"></video>`;
+        } else if (extension.match(/(jpg|jpeg|png|webp|gif|avif)$/i)) {
+            visualizador = `<img src="${rutaMedia}" class="w-full rounded-2xl bg-black max-h-[500px] object-contain shadow-2xl mx-auto">`;
+        } else if (extension === 'pdf') {
+            visualizador = `<iframe src="${rutaMedia}" class="w-full h-[500px] rounded-2xl border border-neutral-800 shadow-2xl"></iframe>`;
+        } else {
+            visualizador = `
+                <div class="w-full py-12 bg-indigo-950/20 rounded-2xl border border-indigo-500/20 flex flex-col items-center justify-center">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" class="mb-4"><path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><line x1="10" y1="9" x2="8" y2="9"></line></svg>
+                    <span class="text-indigo-400 font-bold uppercase tracking-widest text-xs">${extension}</span>
+                    <button onclick="require('electron').shell.openPath('${path.join(rutaCarpeta, p.archivo).replace(/\\/g, '\\\\')}')" 
+                            class="mt-4 bg-indigo-600 hover:bg-indigo-500 text-white px-4 py-2 rounded-xl text-[9px] font-bold transition-all">
+                        ABRIR ARCHIVO
+                    </button>
+                </div>`;
+        }
+    }
+    
+    // 2. Inyección de HTML
+    content.innerHTML = `
+    <div class="w-full mb-6">
+        ${visualizador}
+    </div>
+    
+    <div class="space-y-5">
+        <div class="flex flex-wrap items-center justify-between gap-4 border-b border-neutral-800 pb-4">
+            <div class="flex items-center gap-3">
+                <span class="text-[10px] font-black bg-indigo-600/20 text-indigo-400 px-3 py-1 rounded-lg border border-indigo-500/20 uppercase tracking-tighter">${p.ia || 'IA N/A'}</span>
+                <span class="text-[10px] text-neutral-500 font-mono">${p.fecha || ''}</span>
+            </div>
+            <div class="flex gap-1 flex-wrap">
+                ${p.tags ? p.tags.map(t => `<span class="text-[8px] bg-neutral-800 text-neutral-400 px-2 py-0.5 rounded border border-neutral-700 uppercase font-bold">#${t}</span>`).join('') : ''}
+            </div>
+        </div>
+
+        <div>
+            <h3 class="text-[9px] font-bold text-neutral-500 uppercase tracking-[0.2em] mb-2">Prompt Principal</h3>
+            <p class="text-sm text-neutral-200 bg-neutral-800/40 p-4 rounded-xl border border-neutral-800 leading-relaxed whitespace-pre-wrap">${p.prompt}</p>
+        </div>
+
+        ${p.traduccion ? `
+        <div>
+            <h3 class="text-[9px] font-bold text-neutral-500 uppercase tracking-[0.2em] mb-2">Notas Adicionales</h3>
+            <p class="text-sm text-neutral-400 italic bg-neutral-900/50 p-4 rounded-xl border border-neutral-800/50 leading-relaxed">${p.traduccion}</p>
+        </div>` : ''}
+        
+        <div class="flex flex-wrap justify-center gap-2 pt-6">
+            <button onclick="navigator.clipboard.writeText(\`${p.prompt.replace(/`/g, '\\`').replace(/\$/g, '\\$')}\`); toast('Copiado');" 
+                    class="bg-indigo-600 text-white px-5 py-2.5 rounded-xl font-bold text-[10px] hover:bg-indigo-500 transition-all uppercase tracking-wider">
+                Copiar Texto
+            </button>
+            
+            ${p.archivo ? `
+            <button onclick="descargarArchivo('${p.archivo}')" 
+                class="bg-neutral-800 text-white px-5 py-2.5 rounded-xl font-bold text-[10px] border border-neutral-700 hover:bg-neutral-700 transition-all uppercase tracking-wider flex items-center gap-2">
+                Descargar
+            </button>` : ''}
+            
+            <button onclick="cerrarModal(); prepararEdicion(${p.id})" 
+                class="bg-neutral-800 text-white px-5 py-2.5 rounded-xl font-bold text-[10px] border border-neutral-700 hover:bg-neutral-700 transition-all uppercase tracking-wider">
+                Editar
+            </button>
+        </div>
+    </div>`;
+    
+    document.getElementById('promptModal').classList.remove('hidden');
+    document.body.style.overflow = 'hidden';
+}
+
+   function cerrarModal() {
+    document.getElementById('promptModal').classList.add('hidden');
+    
+    // Verificamos si la galería está abierta
+    const gallery = document.getElementById('explorerModal');
+    const isGalleryOpen = gallery && !gallery.classList.contains('hidden');
+    
+    // Si NO hay galería abierta, devolvemos el scroll al body
+    if (!isGalleryOpen) {
+        document.body.style.overflow = 'auto';
+    }
+    // Si la galería está abierta, el scroll debe seguir bloqueado para ella
+}
+      
+        function cerrarModalExterno(event) {
+            const modalContainer = document.getElementById('modalContainer');
+            // Si el clic fue en el fondo (fuera del modalContainer)
+            if (!modalContainer.contains(event.target)) {
+                cerrarModal();
+            }
+        }
+        function abrirExplorer() {
+            document.getElementById('explorerModal').classList.remove('hidden');
+            renderExplorerChips();
+            renderExplorer();
+        }
+
+        function cerrarExplorer() { document.getElementById('explorerModal').classList.add('hidden'); }
+
+        function actualizarSugerenciasIA() {
+            const ias = [...new Set(prompts.map(p => p.ia))].filter(Boolean);
+            document.getElementById('iaSugeridas').innerHTML = ias.map(ia => `
+                <button onclick="document.getElementById('searchText').value='${ia}'; render();" class="text-[10px] bg-neutral-800 text-neutral-400 px-3 py-1 rounded-full border border-neutral-700">${ia}</button>
+            `).join('');
+        }
+
+        document.addEventListener('DOMContentLoaded', () => {
+            verificarRutaUSB();
+            actualizarEstadoCarpeta();
+            render();
+            // Nube de etiquetas rápida
+            const tags = ["Horizontal", "Vertical", "Square", "Portrait", "Landscape", "Close-up", "Wide shot", "Medium shot", "Aerial", "Macro", "Panorama", "Time-lapse", "Slow motion", "4K", "HD", "Cinematic", "High contrast", "Low light", "Background", "Copy space", "People", "person","animal", "fantasy"];
+            document.getElementById('tagCloud').innerHTML = tags.map(t => `<button type="button" onclick="document.getElementById('tags').value += (document.getElementById('tags').value ? ', ' : '') + '${t}'" class="text-[10px] bg-neutral-800 text-neutral-500 px-2 py-1 rounded border border-neutral-700">+ ${t}</button>`).join('');
+        });
+
+        async function exportarDatos() {
+    const dataStr = JSON.stringify(prompts, null, 2);
+    const filePath = await ipcRenderer.invoke('dialog:saveFile', {
+        title: 'Exportar Prompts',
+        defaultPath: 'prompts_backup.json'
+    });
+    
+    if (filePath) {
+        fs.writeFileSync(filePath, dataStr);
+        toast("Backup exportado con éxito");
+    }
+}
+
+async function importarDatos() {
+    const filePath = await ipcRenderer.invoke('dialog:openFile');
+    if (filePath) {
+        try {
+            const dataRaw = fs.readFileSync(filePath, 'utf8');
+            const nuevosPrompts = JSON.parse(dataRaw);
+            if (Array.isArray(nuevosPrompts)) {
+                prompts = nuevosPrompts;
+                localStorage.setItem("prompts", JSON.stringify(prompts));
+                render();
+                toast("Datos importados: " + prompts.length + " prompts");
+            }
+        } catch (e) {
+            alert("Error al leer el archivo JSON");
+        }
+    }
+}
+
+async function descargarArchivo(nombreArchivo) {
+    if (!rutaCarpeta || !nombreArchivo) return;
+    
+    const rutaOrigen = path.join(rutaCarpeta, nombreArchivo);
+    
+    // Abrimos el diálogo de guardado de Electron
+    const rutaDestino = await ipcRenderer.invoke('dialog:saveFile', {
+        title: 'Guardar archivo como...',
+        defaultPath: nombreArchivo
+    });
+
+    if (rutaDestino) {
+        try {
+            fs.copyFileSync(rutaOrigen, rutaDestino);
+            toast("Archivo guardado con éxito");
+        } catch (error) {
+            console.error(error);
+            alert("Error al intentar guardar el archivo");
+        }
+    }
+}
+
+function toggleFiltroFavoritosExplorer() {
+    // Reutilizamos la variable global mostrarSoloFavoritos que ya tienes
+    mostrarSoloFavoritos = !mostrarSoloFavoritos;
+    
+    // Actualizamos el renderizado de ambas vistas para mantener sincronía
+    renderExplorer();
+    render(); 
+
+    // Actualizamos el aspecto de los dos botones (el de la home y el del modal)
+    const btnHome = document.getElementById('filterFavs');
+    const btnModal = document.getElementById('explorerFilterFavs');
+    
+    const texto = mostrarSoloFavoritos ? "★ Solo Favoritos" : "☆ Favoritos";
+    
+    [btnHome, btnModal].forEach(btn => {
+        if (btn) {
+            btn.innerText = texto;
+            btn.classList.toggle('text-yellow-400', mostrarSoloFavoritos);
+            btn.classList.toggle('border-yellow-500', mostrarSoloFavoritos);
+        }
+    });
+}
+    </script>
+</head>
+
+<body class="bg-neutral-950 text-neutral-200 min-h-screen p-8">
+    
+   <div id="toast" class="fixed bottom-10 left-1/2 -translate-x-1/2 z-[110] bg-indigo-600 text-white px-6 py-3 rounded-2xl shadow-2xl font-bold text-sm transform translate-y-20 opacity-0 transition-all duration-300">
+    ✅ <span id="toastMessage"></span>
+</div>
+
+    <div class="max-w-5xl mx-auto space-y-10">
+     <header class="flex justify-between items-end border-b border-neutral-800 pb-6">
+    <div>
+        <h1 class="text-3xl font-bold tracking-tight text-white">PromptBox</h1>
+        <div id="folderStatus" class="flex items-center gap-3 mt-2 group cursor-default">
+            <span class="status-dot bg-red-500 shadow-[0_0_10px_rgba(239,68,68,0.5)]"></span>
+            <span class="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-bold">Sin conexión</span>
+        </div>
+    </div>
+    
+    <div class="flex gap-3">
+        <button onclick="importarDatos()" class="text-[10px] bg-neutral-900/50 hover:bg-neutral-800 px-3 py-2 rounded-xl border border-neutral-800 transition uppercase font-bold text-neutral-500 hover:text-neutral-300">Importar</button>
+        <button onclick="exportarDatos()" class="text-[10px] bg-neutral-900/50 hover:bg-neutral-800 px-3 py-2 rounded-xl border border-neutral-800 transition uppercase font-bold text-neutral-500 hover:text-neutral-300">Exportar</button>
+        <button onclick="abrirExplorer()" class="text-xs bg-neutral-900 hover:bg-neutral-800 px-4 py-2 rounded-xl border border-neutral-800 transition">🔍 Galería</button>
+        <button onclick="seleccionarCarpeta()" class="text-xs bg-indigo-600 hover:bg-indigo-500 px-5 py-2 rounded-xl font-bold transition shadow-lg shadow-indigo-500/20">📁 Vincular</button>
+    </div>
+    
+</header>
+
+<div class="w-full mt-6 -mb-4 rounded-[2.5rem] overflow-hidden border border-neutral-800 bg-black/20 shadow-inner group" style="height: 350x;">
+    <img src="banner.png" 
+         alt="Banner" 
+         class="w-full h-full object-contain transition-transform duration-700 group-hover:scale-[1.02]"
+         onerror="this.style.display='none'">
+</div>
+
+       <section class="bg-neutral-900/50 p-8 rounded-[2.5rem] border border-neutral-800 space-y-6 shadow-2xl">
+    <div class="grid grid-cols-2 gap-4">
+        <select id="tipo" class="bg-neutral-800 p-3 rounded-xl border border-neutral-700 text-sm outline-none focus:border-indigo-500 transition-all">
+            <option value="Foto">Foto</option>
+            <option value="Video">Video</option>
+            <option value="Texto">Texto</option>
+            <option value="Ilustración">Ilustración</option>
+        </select>
+        <input id="ia" placeholder="IA (Midjourney, Sora...)" class="bg-neutral-800 p-3 rounded-xl border border-neutral-700 text-sm outline-none focus:border-indigo-500 transition-all">
+    </div>
+
+    <textarea id="promptInput" placeholder="Escribe el prompt aquí..." class="w-full bg-neutral-800 p-4 rounded-2xl h-32 border border-neutral-700 outline-none focus:border-indigo-500 transition-all"></textarea>
+
+    <textarea id="traduccion" placeholder="Traducción o notas adicionales..." class="w-full bg-neutral-800/40 p-4 rounded-2xl h-20 border border-neutral-800 outline-none focus:border-indigo-500 transition-all text-sm text-neutral-400 italic"></textarea>
+
+    <div class="space-y-3">
+        <input id="tags" placeholder="Etiquetas (separadas por comas)" class="w-full bg-neutral-800 p-3 rounded-xl border border-neutral-700 text-sm outline-none focus:border-indigo-500 transition-all">
+        <div id="tagCloud" class="flex flex-wrap gap-2"></div>
+    </div>
+
+    <div id="dropZone" ondragover="event.preventDefault(); this.classList.add('drag-over')" ondragleave="this.classList.remove('drag-over')" ondrop="handleDrop(event)"
+        class="p-6 border-2 border-dashed border-neutral-800 rounded-2xl bg-black/20 text-center transition-all">
+        <p class="text-[10px] font-bold uppercase opacity-30 tracking-widest">Arrastra archivos aquí o usa el botón</p>
+        <input type="file" id="archivoInput" class="text-[10px] mt-2 opacity-50 cursor-pointer">
+    </div>
+
+    <input type="hidden" id="editId">
+    <div class="flex gap-3">
+        <button id="btnGuardar" onclick="guardarPrompt()" class="flex-1 bg-white text-black p-4 rounded-2xl font-black hover:bg-indigo-600 hover:text-white transition-all transform active:scale-[0.98]">
+            GUARDAR PROMPT
+        </button>
+        <button id="btnCancelar" onclick="cancelarEdicion()" class="hidden bg-red-500/10 text-red-500 px-8 rounded-2xl font-bold border border-red-500/20 hover:bg-red-500 hover:text-white transition-all">
+            CANCELAR
+        </button>
+    </div>
+</section>
+
+        <div class="flex gap-4 items-center">
+            <div class="flex-1 relative">
+                <input id="searchText" oninput="render()" placeholder="Buscar prompts..." class="w-full bg-neutral-900 border border-neutral-800 rounded-2xl py-3 px-6 text-sm outline-none focus:border-indigo-500">
+            </div>
+            <select id="searchTipo" onchange="render()" class="bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3 text-sm outline-none">
+                <option value="">Tipos</option><option value="Foto">Foto</option><option value="Video">Video</option>
+            </select>
+            <button id="filterFavs" onclick="toggleFiltroFavoritos()" class="bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3 text-sm">☆ Favoritos</button>
+        </div>
+
+        <div id="iaSugeridas" class="flex gap-2 overflow-x-auto no-scrollbar"></div>
+
+        <section class="space-y-6">
+            <h2 class="text-[10px] font-bold uppercase tracking-[0.3em] opacity-30">Recientes <span id="contadorPrompts" class="ml-2 text-indigo-500"></span></h2>
+            <div id="historial" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6"></div>
+        </section>
+    </div>
+
+    <div id="promptModal" onclick="cerrarModalExterno(event)" class="fixed inset-0 bg-black/90 z-[100] backdrop-blur-sm z-50 hidden flex items-center justify-center p-4">
+    <div id="modalContainer" class="bg-neutral-900 border border-neutral-800 w-full max-w-2xl max-h-[90vh] rounded-[2.5rem] overflow-y-auto shadow-2xl relative">
+        <button onclick="cerrarModal()" class="absolute top-6 right-6 z-50 text-white/20 hover:text-white text-2xl font-light">×</button>
+        <div id="modalContent" class="p-10"></div>
+    </div>
+</div>
+
+    <div id="explorerModal" class="fixed inset-0 bg-neutral-950/98 z-[80] backdrop-blur-2xl z-[60] hidden flex flex-col p-8 animate-fade">
+        <header class="max-w-7xl mx-auto w-full mb-8 flex flex-col md:flex-row gap-6 items-center">
+    <div class="flex-1">
+        <h2 class="text-2xl font-bold">Galería <span id="explorerCount" class="text-xs opacity-30 ml-2 font-mono"></span></h2>
+    </div>
+    <div class="flex-[2] flex gap-3 w-full">
+        <button id="explorerFilterFavs" onclick="toggleFiltroFavoritosExplorer()" 
+                class="bg-neutral-900 border border-neutral-800 rounded-2xl px-4 py-3 text-sm whitespace-nowrap transition-all">
+            ☆ Favoritos
+        </button>
+        
+        <input id="explorerSearchText" oninput="renderExplorer()" placeholder="Filtrar galería..." 
+               class="w-full bg-neutral-900 border border-neutral-800 rounded-2xl py-4 px-6 text-sm outline-none focus:border-indigo-500">
+        
+        <button onclick="cerrarExplorer()" class="bg-red-500/10 text-red-500 px-6 rounded-2xl font-bold text-xs border border-red-500/20 hover:bg-red-500 hover:text-white transition-all">
+            CERRAR
+        </button>
+    </div>
+</header>
+        <div class="max-w-7xl mx-auto w-full mb-8">
+            <div id="explorerTagChips" class="flex gap-3 overflow-x-auto no-scrollbar pb-2"></div>
+        </div>
+        <div class="flex-1 overflow-y-auto custom-scrollbar px-4">
+            <div id="explorerGrid" class="max-w-7xl mx-auto grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-10 py-10"></div>
+        </div>
+    </div>
+
+</body>
+<footer class="mt-20 py-12 border-t border-neutral-900/50">
+        <div class="max-w-5xl mx-auto flex flex-col md:flex-row justify-between items-center gap-6 opacity-60 hover:opacity-100 transition-opacity duration-500">
+            <div class="space-y-1 text-center md:text-left">
+                <p class="text-[10px] font-black uppercase tracking-[0.3em] text-indigo-500">PromptBox v2.0</p>
+                <p class="text-[9px] text-neutral-500 font-medium tracking-wide">
+                    Una creación de <span class="text-neutral-300 font-bold">David López</span>
+                </p>
+            </div>
+            
+            <div class="flex items-center gap-8">
+                <a href="https://www.linkedin.com/in/david-l%C3%B3pez-teruel/" 
+                   target="_blank" 
+                   class="flex items-center gap-2 group transition-all">
+                    <span class="text-[9px] uppercase tracking-widest text-neutral-600 group-hover:text-indigo-400 font-bold">LinkedIn</span>
+                    <svg class="text-neutral-700 group-hover:text-indigo-500 transition-colors" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 8a6 6 0 0 1 6 6v7h-4v-7a2 2 0 0 0-2-2 2 2 0 0 0-2 2v7h-4v-7a6 6 0 0 1 6-6z"></path><rect x="2" y="9" width="4" height="12"></rect><circle cx="4" cy="4" r="2"></circle></svg>
+                </a>
+
+                <div class="h-8 w-[1px] bg-neutral-800"></div>
+
+                <div class="text-center md:text-right">
+                    <p class="text-[9px] uppercase tracking-widest text-neutral-600 mb-1 font-bold">Almacenamiento</p>
+                    <p class="text-[10px] text-neutral-400 font-mono">Local + Backup JSON</p>
+                </div>
+            </div>
+        </div>
+        
+        <div class="max-w-5xl mx-auto mt-8 text-center">
+            <p class="text-[8px] uppercase tracking-[0.5em] text-neutral-700 font-bold">
+                &copy; 2024 · Creative Workflow Tool
+            </p>
+        </div>
+    </footer>
+</html>
