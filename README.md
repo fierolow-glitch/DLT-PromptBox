@@ -18,7 +18,7 @@
 ## 💾 Descargas (Ejecutables)
 Si no eres desarrollador y solo quieres usar la herramienta, descarga la última versión aquí:
 
-👉 **[DESCARGAR PROMPTBOX (Windows/Mac)](https://dltprompttools/bss.design)** *(Aquí pondrás el enlace a tu sección de Releases)*
+👉 **[DESCARGAR PROMPTBOX (Windows/Mac)]()** *(Aquí pondrás el enlace a tu sección de Releases)*
 
 ---
 
